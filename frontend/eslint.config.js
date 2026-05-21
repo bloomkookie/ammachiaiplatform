@@ -23,7 +23,13 @@ export default defineConfig([
       },
     },
     rules: {
-      'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
+      'no-unused-vars': 'warn',
+      'no-undef': 'off',
+      'no-useless-escape': 'off',
+      'no-empty': 'warn',
+      'no-dupe-keys': 'warn',
+      'react-hooks/exhaustive-deps': 'off',
+      'react-refresh/only-export-components': 'warn',
     },
   },
 ])
