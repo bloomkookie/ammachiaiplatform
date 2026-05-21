@@ -1,0 +1,44 @@
+# Version control
+.git
+.gitignore
+
+# Virtual environments
+.venv_django/
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment files (secrets)
+.env
+.env.local
+.env*.local
+
+# Node modules (frontend has its own .dockerignore via context)
+node_modules/
+
+# Build artifacts
+dist/
+build/
+*.pyc
+__pycache__/
+
+# Database (will use volume mount)
+*.sqlite3
+
+# Logs
+*.log
+
+# Docker-in-docker
+docker-compose.yml
+nginx/
+
+# Docs
+README.md
+*.md

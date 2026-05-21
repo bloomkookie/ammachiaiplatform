@@ -1,0 +1,584 @@
+import React, { useState, useEffect } from 'react';
+import './profile.css';
+import Sidebar from '../components/Sidebar.jsx';
+import TranslatedText from '../components/TranslatedText';
+import { useLanguage } from '../context/LanguageContext';
+import { apiFetch } from '../utils/api';
+
+export default function Profile() {
+  const { language: userLanguage } = useLanguage();
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState(false);
+  const [formData, setFormData] = useState({});
+  const [message, setMessage] = useState('');
+
+  useEffect(() => {
+    const fetchRealProfileData = async () => {
+      setLoading(true);
+      try {
+        // Get session data
+        const storedSessionRaw = localStorage.getItem('ammachi_session');
+        const session = storedSessionRaw ? JSON.parse(storedSessionRaw) : null;
+        
+        if (session?.userId) {
+          // Fetch real farmer data from API
+          const [farmerRes, farmsRes, activitiesRes] = await Promise.all([
+            apiFetch(`/api/farmers/${session.userId}/`),
+            apiFetch(`/api/farms/?farmer=${session.userId}`),
+            apiFetch(`/api/activities/?farmer=${session.userId}&limit=10`)
+          ]);
+
+          const farmer = await farmerRes.json();
+          const farms = await farmsRes.json();
+          const activities = await activitiesRes.json();
+
+          // Calculate activity statistics
+          const cropsScanned = parseInt(localStorage.getItem('cropsScanned') || '0');
+          const questionsAsked = parseInt(localStorage.getItem('questionsAsked') || '0');
+          
+          // Calculate days active from local storage and activities
+          const activeDaysFromStorage = JSON.parse(localStorage.getItem('activeDays') || '[]');
+          const uniqueDays = new Set(activeDaysFromStorage);
+          
+          // Also add days from backend activities
+          activities.results?.forEach(activity => {
+            const date = new Date(activity.date || activity.created_at).toDateString();
+            uniqueDays.add(date);
+          });
+          const daysActive = uniqueDays.size;
+
+          // Build real user profile
+          const realProfile = {
+            id: farmer.id,
+            name: farmer.name,
+            displayName: farmer.name,
+            email: farmer.email || 'Not provided',
+            phone: farmer.phone,
+            district: farmer.district,
+            state: farmer.state || 'Kerala',
+            language: farmer.preferred_language || 'English',
+            experience: farmer.experience_years || 0,
+            farms: farms.results || [],
+            totalFarms: farms.count || 0,
+            totalAcres: farms.results?.reduce((sum, f) => sum + parseFloat(f.land_size_acres || 0), 0) || 0,
+            recentActivities: activities.results || [],
+            activitiesCount: activities.count || 0,
+            joinDate: farmer.created_at,
+            lastUpdated: farmer.updated_at,
+            // Activity statistics
+            cropsScanned: cropsScanned,
+            questionsAsked: questionsAsked,
+            daysActive: daysActive
+          };
+
+          setUser(realProfile);
+          setFormData(realProfile);
+        } else {
+          // No session - redirect to login
+          window.location.hash = '#/login';
+        }
+      } catch (error) {
+        console.error('Error fetching profile data:', error);
+        // Fallback to session data if API fails
+        const storedSessionRaw = localStorage.getItem('ammachi_session');
+        const session = storedSessionRaw ? JSON.parse(storedSessionRaw) : null;
+        
+        if (session) {
+          const fallbackProfile = {
+            name: session.name || 'Farmer',
+            displayName: session.name || 'Farmer',
+            phone: session.phone || 'Not provided',
+            district: session.district || 'Not provided',
+            state: 'Kerala',
+            email: 'Not provided',
+            farms: [],
+            experience: 0
+          };
+          setUser(fallbackProfile);
+          setFormData(fallbackProfile);
+        } else {
+          window.location.hash = '#/login';
+        }
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchRealProfileData();
+  }, []);
+
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({ ...prev, [name]: value }));
+  };
+
+  // Nested updater for farms
+  const handleFarmChange = (idx, field, value) => {
+    setFormData(prev => {
+      const farms = Array.isArray(prev.farms) ? [...prev.farms] : [];
+      farms[idx] = { ...(farms[idx] || {}), [field]: value };
+      return { ...prev, farms };
+    });
+  };
+
+  const addFarm = () => {
+    setFormData(prev => ({
+      ...prev,
+      farms: [...(prev.farms || []), { name: '', acres: '', location: '', crops: [] }]
+    }));
+  };
+
+  const removeFarm = (idx) => {
+    setFormData(prev => {
+      const farms = [...(prev.farms || [])];
+      farms.splice(idx, 1);
+      return { ...prev, farms };
+    });
+  };
+
+  const handleSave = async () => {
+    try {
+      // Save locally only
+      localStorage.setItem('ammachi_profile', JSON.stringify(formData));
+      setUser(formData);
+      setEditing(false);
+      setMessage('Profile updated successfully!');
+      setTimeout(() => setMessage(''), 3000);
+    } catch (error) {
+      console.error('Error updating profile:', error);
+      setMessage('Failed to update profile');
+    }
+  };
+
+  const handleLogout = () => {
+    // Clear all authentication data
+    localStorage.removeItem('userEmail');
+    localStorage.removeItem('authToken');
+    localStorage.removeItem('ammachi_profile');
+    localStorage.removeItem('ammachi_session');
+    window.location.href = '/';
+  };
+
+  // Get current language from context
+  const { language, changeLanguage } = useLanguage();
+
+  if (loading) {
+    return (
+      <div className="profile-layout">
+        <Sidebar />
+        <main className="profile-main page-scroll">
+          <div className="loading-container">
+            <div className="loading-spinner"></div>
+            <p><TranslatedText text="Loading profile..." /></p>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  return (
+    <div className="profile-layout">
+      <Sidebar />
+      <main className="profile-main page-scroll">
+        <div className="profile-content-wrapper">
+          <div className="profile-content">
+            {/* User Summary Card */}
+            <div className="user-summary-card">
+              <div className="user-avatar">
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M20 21V19C20 17.9391 19.5786 16.9217 18.8284 16.1716C18.0783 15.4214 17.0609 15 16 15H8C6.93913 15 5.92172 15.4214 5.17157 16.1716C4.42143 16.9217 4 17.9391 4 19V21M16 7C16 9.20914 14.2091 11 12 11C9.79086 11 8 9.20914 8 7C8 4.79086 9.79086 3 12 3C14.2091 3 16 4.79086 16 7Z" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </div>
+              <div className="user-info">
+                <h2>{user?.displayName || 'User'}</h2>
+                <p>{user?.district ? <><TranslatedText text="Farmer" /> • {user.district}</> : <TranslatedText text="Farmer" />}</p>
+              </div>
+              <div className="user-tags">
+                {user?.language ? <span className="tag">{user.language}</span> : null}
+                {user?.state ? <span className="tag">{user.state}</span> : null}
+                {typeof user?.experience === 'number' ? <span className="tag">{user.experience} yrs</span> : null}
+              </div>
+            </div>
+
+            {/* Personal Information */}
+            <div className="info-card">
+              <div className="card-header">
+                <h3><TranslatedText text="Personal Information" /></h3>
+                {!editing && (
+                  <button className="edit-btn" onClick={() => setEditing(true)}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M11 4H4C3.46957 4 2.96086 4.21071 2.58579 4.58579C2.21071 4.96086 2 5.46957 2 6V20C2 20.5304 2.21071 21.0391 2.58579 21.4142C2.96086 21.7893 3.46957 22 4 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V13M18.5 2.5C18.8978 2.10218 19.4374 1.87868 20 1.87868C20.5626 1.87868 21.1022 2.10218 21.5 2.5C21.8978 2.89782 22.1213 3.43739 22.1213 4C22.1213 4.56261 21.8978 5.10218 21.5 5.5L12 15L8 16L9 12L18.5 2.5Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                    <TranslatedText text="Edit" />
+                  </button>
+                )}
+              </div>
+
+              {!editing ? (
+                <>
+                  <div className="info-grid">
+                    {/* Full Name */}
+                    <InfoItem label="Full Name" icon="user" value={user?.displayName || '—'} />
+
+                    {/* Email */}
+                    <InfoItem label="Email" icon="mail" value={user?.email || '—'} />
+
+                    {/* Phone */}
+                    <InfoItem label="Phone Number" icon="phone" value={user?.phoneNumber || '—'} />
+
+                    {/* Language */}
+                    <InfoItem label="Language" icon="globe" value={user?.language || '—'} />
+
+                    {/* Experience */}
+                    <InfoItem
+                      label="Experience (years)"
+                      icon="briefcase"
+                      value={typeof user?.experience === 'number' ? `${user.experience}` : '—'}
+                    />
+
+                    {/* Number of farms */}
+                    <InfoItem
+                      label="Number of farms"
+                      icon="layers"
+                      value={typeof user?.numberOfFarms === 'number' ? `${user.numberOfFarms}` : (user?.farms?.length ?? '—')}
+                    />
+
+                    {/* State */}
+                    <InfoItem label="State" icon="map" value={user?.state || '—'} />
+
+                    {/* District */}
+                    <InfoItem label="District" icon="pin" value={user?.district || '—'} />
+                  </div>
+
+                  {/* Farms block */}
+                  <div className="card-header" style={{ marginTop: '1rem' }}>
+                    <h3><TranslatedText text="Farms" /></h3>
+                  </div>
+                  <div className="farms-grid">
+                    {(user?.farms || []).length === 0 ? (
+                      <div className="info-item" style={{ gridColumn: '1 / -1' }}>
+                        <div className="info-content">
+                          <span className="info-value"><TranslatedText text="No farms added." /></span>
+                        </div>
+                      </div>
+                    ) : (
+                      user.farms.map((farm, i) => (
+                        <div className="farm-card" key={i}>
+                          <h4>Farm {i + 1}{farm?.name ? ` — ${farm.name}` : ''}</h4>
+                          <div className="farm-field">
+                            <span className="farm-label">Farm Name</span>
+                            {farm?.name || '—'}
+                          </div>
+                          <div className="farm-field">
+                            <span className="farm-label">Acres</span>
+                            {farm?.acres ?? '—'}
+                          </div>
+                          <div className="farm-field">
+                            <span className="farm-label">Location</span>
+                            {farm?.location || '—'}
+                          </div>
+                          <div className="farm-field" style={{ gridColumn: '1 / -1' }}>
+                            <span className="farm-label">Crops</span>
+                            {Array.isArray(farm?.crops) ? farm.crops.join(', ') : (farm?.crops || '—')}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </>
+              ) : (
+                <form className="edit-form" onSubmit={(e) => { e.preventDefault(); handleSave(); }}>
+                  <div className="form-grid">
+                    <div className="form-group">
+                      <label><TranslatedText text="Full Name" /></label>
+                      <input
+                        type="text"
+                        name="displayName"
+                        value={formData.displayName || ''}
+                        onChange={handleInputChange}
+                      />
+                    </div>
+
+                    <div className="form-group">
+                      <label><TranslatedText text="Email" /></label>
+                      <input
+                        type="email"
+                        name="email"
+                        value={formData.email || ''}
+                        onChange={handleInputChange}
+                        readOnly
+                        title="Email cannot be changed"
+                      />
+                    </div>
+
+                    <div className="form-group">
+                      <label><TranslatedText text="Phone Number" /></label>
+                      <input
+                        type="tel"
+                        name="phoneNumber"
+                        value={formData.phoneNumber || ''}
+                        onChange={handleInputChange}
+                      />
+                    </div>
+
+                    <div className="form-group">
+                      <label><TranslatedText text="Language" /></label>
+                      <select
+                        name="language"
+                        value={formData.language || ''}
+                        onChange={(e) => {
+                          handleInputChange(e);
+                          // Also update the app language when user changes profile language
+                          changeLanguage(e.target.value);
+                        }}
+                        className="language-select"
+                        style={{ backgroundColor: '#66BB6A', color: '#f3f5f4' }}
+                      >
+                        <option value=""><TranslatedText text="Select" /></option>
+                        <option value="English">English</option>
+                        <option value="Malayalam">Malayalam</option>
+                      </select>
+                    </div>
+
+                    <div className="form-group">
+                      <label><TranslatedText text="Experience (years)" /></label>
+                      <input
+                        type="number"
+                        name="experience"
+                        value={formData.experience ?? ''}
+                        onChange={handleInputChange}
+                      />
+                    </div>
+
+                    <div className="form-group">
+                      <label><TranslatedText text="Number of farms" /></label>
+                      <input
+                        type="number"
+                        name="numberOfFarms"
+                        value={formData.numberOfFarms ?? (formData.farms?.length ?? '')}
+                        onChange={handleInputChange}
+                      />
+                    </div>
+
+                    <div className="form-group">
+                      <label><TranslatedText text="State" /></label>
+                      <input
+                        type="text"
+                        name="state"
+                        value={formData.state || ''}
+                        onChange={handleInputChange}
+                      />
+                    </div>
+
+                    <div className="form-group">
+                      <label><TranslatedText text="District" /></label>
+                      <input
+                        type="text"
+                        name="district"
+                        value={formData.district || ''}
+                        onChange={handleInputChange}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Farms editor */}
+                  <div className="card-header" style={{ marginTop: '0.5rem' }}>
+                    <h3><TranslatedText text="Farms" /></h3>
+                    <button type="button" className="edit-btn" onClick={addFarm}><TranslatedText text="Add Farm" /></button>
+                  </div>
+
+                  <div className="farms-grid">
+                    {(formData.farms || []).map((farm, i) => (
+                      <div className="farm-card" key={i}>
+                        <h4>
+                          <TranslatedText text="Farm" /> {i + 1}
+                          <button
+                            type="button"
+                            className="edit-btn"
+                            style={{ float: 'right', padding: '0.25rem 0.6rem' }}
+                            onClick={() => removeFarm(i)}
+                          >
+                            <TranslatedText text="Remove" />
+                          </button>
+                        </h4>
+
+                        <div className="form-group" style={{ margin: 0 }}>
+                          <label className="farm-label"><TranslatedText text="Farm Name" /></label>
+                          <input
+                            type="text"
+                            value={farm?.name || ''}
+                            onChange={(e) => handleFarmChange(i, 'name', e.target.value)}
+                          />
+                        </div>
+                        <div className="form-group" style={{ margin: 0 }}>
+                          <label className="farm-label"><TranslatedText text="Acres" /></label>
+                          <input
+                            type="number"
+                            value={farm?.acres ?? ''}
+                            onChange={(e) => handleFarmChange(i, 'acres', e.target.value)}
+                          />
+                        </div>
+                        <div className="form-group" style={{ margin: 0 }}>
+                          <label className="farm-label"><TranslatedText text="Location" /></label>
+                          <input
+                            type="text"
+                            value={farm?.location || ''}
+                            onChange={(e) => handleFarmChange(i, 'location', e.target.value)}
+                          />
+                        </div>
+                        <div className="form-group" style={{ gridColumn: '1 / -1', margin: 0 }}>
+                          <label className="farm-label"><TranslatedText text="Crops (comma separated)" /></label>
+                          <input
+                            type="text"
+                            value={
+                              Array.isArray(farm?.crops)
+                                ? farm.crops.join(', ')
+                                : (farm?.crops || '')
+                            }
+                            onChange={(e) => {
+                              // Convert comma-separated string to array for database
+                              const cropsArray = e.target.value.split(',').map(crop => crop.trim()).filter(crop => crop !== '');
+                              handleFarmChange(i, 'crops', cropsArray);
+                            }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="form-actions" style={{ marginTop: '1rem' }}>
+                    <button type="submit" className="save-btn"><TranslatedText text="Save Changes" /></button>
+                    <button type="button" className="cancel-btn" onClick={() => setEditing(false)}><TranslatedText text="Cancel" /></button>
+                  </div>
+                </form>
+              )}
+            </div>
+
+            {/* App Settings */}
+            <div className="info-card">
+              <div className="card-header">
+                <h3><TranslatedText text="App Settings" /></h3>
+              </div>
+              <div className="settings-item">
+                <div className="settings-icon">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 2C13.1 2 14 2.9 14 4C14 5.1 13.1 6 12 6C10.9 6 10 5.1 10 4C10 2.9 10.9 2 12 2ZM21 9V7L15 1H5C3.89 1 3 1.89 3 3V21C3 22.11 3.89 23 5 23H19C20.11 23 21 22.11 21 21V9M19 9H14V4L19 9Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </div>
+                <div className="settings-content">
+                  <span className="settings-label"><TranslatedText text="Language" /></span>
+                  <span className="settings-value"><TranslatedText text="Choose your preferred language" /></span>
+                </div>
+                <select
+                  className="language-select"
+                  value={language}
+                  onChange={(e) => {
+                    const newLanguage = e.target.value;
+                    setFormData(prev => ({ ...prev, language: newLanguage }));
+                    // Update app language using context
+                    changeLanguage(newLanguage);
+                    // Save language change immediately to database
+                    // Persist language locally
+                    const currentProfile = JSON.parse(localStorage.getItem('ammachi_profile') || '{}');
+                    currentProfile.language = newLanguage;
+                    localStorage.setItem('ammachi_profile', JSON.stringify(currentProfile));
+                  }}
+                >
+                  <option value="English">English</option>
+                  <option value="Malayalam">Malayalam</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Activity */}
+            <div className="activity-card">
+              <h3><TranslatedText text="Your Activity" /></h3>
+              <div className="activity-stats">
+                <div className="stat-item">
+                  <span className="stat-number">{typeof user?.cropsScanned === 'number' ? user.cropsScanned : 0}</span>
+                  <span className="stat-label"><TranslatedText text="Crops Scanned" /></span>
+                </div>
+                <div className="stat-item">
+                  <span className="stat-number">{typeof user?.questionsAsked === 'number' ? user.questionsAsked : 0}</span>
+                  <span className="stat-label"><TranslatedText text="Questions Asked" /></span>
+                </div>
+                <div className="stat-item">
+                  <span className="stat-number">{typeof user?.daysActive === 'number' ? user.daysActive : 0}</span>
+                  <span className="stat-label"><TranslatedText text="Days Active" /></span>
+                </div>
+              </div>
+            </div>
+
+            {message && <div className="message">{message}</div>}
+          </div>
+        </div>
+      </main>
+    </div>
+  );
+}
+
+/* ---------- Small icon component for readability ---------- */
+function InfoItem({ label, value, icon }) {
+  const { language } = useLanguage();
+  // No need to destructure language here as we're using TranslatedText component
+  const Icon = () => {
+    switch (icon) {
+      case 'user': return (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M20 21V19C20 17.9 19.58 16.92 18.83 16.17C18.08 15.42 17.06 15 16 15H8C6.94 15 5.92 15.42 5.17 16.17C4.42 16.92 4 17.9 4 19V21" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+          <path d="M16 7C16 9.21 14.21 11 12 11C9.79 11 8 9.21 8 7C8 4.79 9.79 3 12 3C14.21 3 16 4.79 16 7Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      );
+      case 'mail': return (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M4 4H20V20H4V4Z" stroke="currentColor" strokeWidth="2"/><path d="M4 6L12 13L20 6" stroke="currentColor" strokeWidth="2"/>
+        </svg>
+      );
+      case 'phone': return (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M22 16.92V19.92C22 20.98 21.12 21.86 20.06 21.86C10.72 21.3 2.7 13.28 2.14 3.94C2.14 2.88 3.02 2 4.08 2H7.08C7.53 2 7.94 2.24 8.15 2.63L9.9 5.94C10.08 6.28 10.05 6.68 9.82 6.98L8.37 8.87C9.77 11.61 12.11 13.95 14.85 15.35L16.74 13.9C17.04 13.67 17.44 13.64 17.78 13.82L21.09 15.57C21.48 15.78 21.72 16.19 21.72 16.64L22 16.92Z" stroke="currentColor" strokeWidth="2"/>
+        </svg>
+      );
+      case 'globe': return (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2"/><path d="M3 12H21M12 3C14.5 6.5 14.5 17.5 12 21M12 3C9.5 6.5 9.5 17.5 12 21" stroke="currentColor" strokeWidth="2"/>
+        </svg>
+      );
+      case 'briefcase': return (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M3 7H21V19C21 20.1 20.1 21 19 21H5C3.9 21 3 20.1 3 19V7Z" stroke="currentColor" strokeWidth="2"/><path d="M8 7V5C8 3.9 8.9 3 10 3H14C15.1 3 16 3.9 16 5V7" stroke="currentColor" strokeWidth="2"/>
+        </svg>
+      );
+      case 'layers': return (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" strokeWidth="2"/><path d="M2 12L12 17L22 12" stroke="currentColor" strokeWidth="2"/><path d="M2 17L12 22L22 17" stroke="currentColor" strokeWidth="2"/>
+        </svg>
+      );
+      case 'map': return (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M9 3L15 5L21 3V17L15 19L9 17L3 19V5L9 3Z" stroke="currentColor" strokeWidth="2"/>
+        </svg>
+      );
+      case 'pin': return (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M21 10C21 17 12 23 12 23S3 17 3 10C3 7.6 3.95 5.32 5.64 3.64C7.32 1.95 9.61 1 12 1C14.39 1 16.68 1.95 18.36 3.64C20.05 5.32 21 7.6 21 10Z" stroke="currentColor" strokeWidth="2"/>
+          <circle cx="12" cy="10" r="3" stroke="currentColor" strokeWidth="2"/>
+        </svg>
+      );
+      default: return null;
+    }
+  };
+
+  return (
+    <div className="info-item">
+      <div className="info-icon">
+        <Icon />
+      </div>
+      <div className="info-content">
+        <span className="info-label"><TranslatedText text={label} /></span>
+        <span className="info-value">{value}</span>
+      </div>
+    </div>
+  );
+}
